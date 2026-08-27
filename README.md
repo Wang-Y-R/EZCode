@@ -8,7 +8,9 @@
 
 - Python 3.11+
 - Anthropic Messages API（原生 tool calling）
-- [`anthropic`](https://github.com/anthropics/anthropic-sdk-python) 官方 Python 客户端
+- [`anthropic`] 官方 Python 客户端库（异步 + 流式）
+- `prompt_toolkit` 提供终端输入历史
+- `rich` 提供流式 Markdown / 面板渲染
 - `python-dotenv` 读取环境变量
 
 ## 功能规划
@@ -17,8 +19,33 @@
 
 ## 快速开始
 
-> 尚未实现，待补充。
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 配置环境变量
+#    Windows:  copy .env.example .env
+#    Linux/macOS: cp .env.example .env
+#    然后编辑 .env，填入 ANTHROPIC_API_KEY 和 MODEL_ID
+
+# 3. 运行
+python -m ezcode            # 进入交互式 REPL（输入任务回车发送，q 退出）
+python -m ezcode "你的任务"  # 单次执行
+```
 
 ## 目录结构
 
-> 尚未实现，待补充。
+```
+EZCode/
+├── ezcode/
+│   ├── __init__.py
+│   ├── config.py      # 环境变量、模型端点、系统提示词、shell 探测
+│   ├── tools.py       # 工具定义与本地执行（bash）
+│   ├── agent.py       # 核心循环：流式调用 + 工具执行 + 回填结果
+│   ├── cli.py         # prompt_toolkit + rich 的终端交互界面
+│   └── __main__.py    # 入口（python -m ezcode）
+├── requirements.txt
+├── .env.example
+├── TODO.md
+└── README.md
+```

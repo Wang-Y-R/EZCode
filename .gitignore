@@ -6,3 +6,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# 本地交互历史
+.agent_history
