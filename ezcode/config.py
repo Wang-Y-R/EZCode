@@ -7,6 +7,8 @@ import shutil
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 
+from .skill import SKILL_LOADER
+
 load_dotenv(override=True)
 
 # 兼容某些第三方网关：不设置 AUTH_TOKEN，避免与 API_KEY 冲突
@@ -28,8 +30,11 @@ SYSTEM = (
     "Use the available tools to read and edit files, run commands, and solve the "
     "user's programming tasks. Before starting a multi-step task, use todo_write to "
     "plan your steps and update the status as you go. For focused exploration or a "
-    "self-contained subtask, delegate to the task tool. Destructive commands and access "
-    "outside the workspace require user approval. Act, don't just explain."
+    "self-contained subtask, delegate to the task tool. Before tackling an unfamiliar "
+    "topic, use load_skill to read the relevant skill's full instructions. Destructive "
+    "commands and access outside the workspace require user approval. Act, don't just "
+    "explain.\n\n"
+    f"Skills available:\n{SKILL_LOADER.catalog()}"
 )
 
 SUB_SYSTEM = (

@@ -1,10 +1,11 @@
-"""工具定义与本地执行：bash / read_file / write_file / edit_file / glob。"""
+"""工具定义与本地执行：bash / read_file / write_file / edit_file / glob / todo_write / task / load_skill。"""
 
 import glob as _glob
 import subprocess
 from pathlib import Path
 
 from . import config
+from .skill import run_load_skill
 from .todo import run_todo_write
 
 WORKDIR_PATH = Path(config.WORKDIR).resolve()
@@ -182,6 +183,16 @@ TOOLS = [
             "required": ["prompt"],
         },
     },
+    {
+        "name": "load_skill",
+        "description": "Load the full SKILL.md content by skill name. Use when a listed skill applies "
+        "to the current task; the catalog in the system prompt lists available skills.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Skill name to load."}},
+            "required": ["name"],
+        },
+    },
 ]
 
 # 注意：task 的 handler 是异步的（需要嵌套调用模型），定义在 agent.py 的 _run_subagent，
@@ -193,8 +204,9 @@ TOOL_HANDLERS = {
     "edit_file": run_edit,
     "glob": run_glob,
     "todo_write": run_todo_write,
+    "load_skill": run_load_skill,
 }
 
-# 基础五工具：子 Agent 只拥有这些，不能再次委派（无 task）、也不规划（无 todo_write）
-SUB_TOOLS = [t for t in TOOLS if t["name"] not in ("task", "todo_write")]
-SUB_HANDLERS = {k: v for k, v in TOOL_HANDLERS.items() if k != "todo_write"}
+# 基础五工具：子 Agent 只拥有这些，不能再次委派（无 task）、不规划（无 todo_write）、不加载技能（无 load_skill）
+SUB_TOOLS = [t for t in TOOLS if t["name"] not in ("task", "todo_write", "load_skill")]
+SUB_HANDLERS = {k: v for k, v in TOOL_HANDLERS.items() if k not in ("todo_write", "load_skill")}

@@ -10,7 +10,7 @@
 - [ ] **4 Hooks** —— PreToolUse / PostToolUse 扩展点，不改主循环也能扩展
 - [ ] **5 TodoWrite** —— 先列计划再执行，提高长任务完成率
 - [x] **6 Subagent** —— 给子任务全新的 `messages[]`，最终文本作为一条工具结果返回
-- [ ] **7 Skill Loading** —— 技能先列目录，用到时再按需展开注入
+- [x] **7 Skill Loading** —— 技能先列目录，用到时再按需展开注入
 - [ ] **8 Context Compact** —— 上下文压缩（budget / snip / micro / summary 四步）
 - [ ] **9 Memory** —— 记忆系统（筛选 / 提取 / 整理三个子系统）
 - [ ] **10 Task System** —— 文件持久化的任务图（TaskRecord / blockedBy）
