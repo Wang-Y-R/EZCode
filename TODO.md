@@ -13,5 +13,5 @@
 - [x] **7 Skill Loading** —— 技能先列目录，用到时再按需展开注入
 - [x] **8 Context Compact** —— 上下文压缩（budget / snip / micro / summary 四步）
 - [x] **9 Memory** —— 记忆系统（筛选 / 提取 / 整理三个子系统）
-- [ ] **10 Task System** —— 文件持久化的任务图（TaskRecord / blockedBy）
-- [ ] **11 Background Tasks** —— 慢操作丢后台线程，完成后注入通知
+- [x] **10 Task System** —— 文件持久化的任务图（TaskRecord / blockedBy）
+- [x] **11 Background Tasks** —— 慢操作丢后台线程，完成后注入通知

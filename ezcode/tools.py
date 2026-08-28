@@ -6,6 +6,14 @@ from pathlib import Path
 
 from . import config
 from .skill import run_load_skill
+from .tasks import (
+    run_claim_task,
+    run_complete_task,
+    run_create_task,
+    run_get_task,
+    run_list_tasks,
+    run_update_task,
+)
 from .todo import run_todo_write
 
 WORKDIR_PATH = Path(config.WORKDIR).resolve()
@@ -21,8 +29,12 @@ def safe_path(p: str) -> Path:
     return path
 
 
-def run_bash(command: str) -> str:
-    """执行一条 shell 命令，返回 stdout+stderr（截断到合理长度）。"""
+def run_bash(command: str, run_in_background: bool = False) -> str:
+    """执行一条 shell 命令，返回 stdout+stderr（截断到合理长度）。
+
+    run_in_background 由 Agent 循环在进入本 handler 前消费（见 background.should_run_background），
+    这里保留该参数只为兼容 schema 传入，实际永远同步执行。
+    """
     if any(d in command for d in DANGEROUS):
         return "Error: dangerous command blocked"
     try:
@@ -39,7 +51,10 @@ def run_bash(command: str) -> str:
                 encoding="utf-8", errors="replace", timeout=120,
             )
         out = (result.stdout + result.stderr).strip()
-        return out[:50000] if out else "(no output)"
+        out = out[:50000] if out else "(no output)"
+        if result.returncode != 0:
+            return f"Error: command exited with status {result.returncode}\n{out}"
+        return out
     except subprocess.TimeoutExpired:
         return "Error: command timed out (120s)"
     except (FileNotFoundError, OSError) as exc:
@@ -98,7 +113,13 @@ TOOLS = [
         "description": "Run a shell command in the project directory and return its output.",
         "input_schema": {
             "type": "object",
-            "properties": {"command": {"type": "string", "description": "The shell command to run."}},
+            "properties": {
+                "command": {"type": "string", "description": "The shell command to run."},
+                "run_in_background": {
+                    "type": "boolean",
+                    "description": "Set true for independent long-running commands; the loop continues and the result arrives as a task_notification on a later turn.",
+                },
+            },
             "required": ["command"],
         },
     },
@@ -202,6 +223,69 @@ TOOLS = [
             "properties": {},
         },
     },
+    {
+        "name": "create_task",
+        "description": "Create a persistent task and return its runtime-generated ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "Short task summary."},
+                "description": {"type": "string", "description": "Optional details."},
+            },
+            "required": ["subject"],
+        },
+    },
+    {
+        "name": "update_task",
+        "description": "Add dependencies to a task using IDs returned by create_task.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "pattern": "^task_[0-9a-f]{8}$"},
+                "addBlockedBy": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": "^task_[0-9a-f]{8}$"},
+                    "minItems": 1,
+                },
+            },
+            "required": ["task_id", "addBlockedBy"],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": "List tasks with status, owner, and dependencies.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "get_task",
+        "description": "Get a task's full JSON record by ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}},
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "claim_task",
+        "description": "Claim a pending task whose dependencies are all completed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}},
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "complete_task",
+        "description": "Complete the task claimed by this agent, unlocking downstream tasks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}},
+            "required": ["task_id"],
+        },
+    },
 ]
 
 # 注意：task 的 handler 是异步的（需要嵌套调用模型），定义在 agent.py 的 _run_subagent，
@@ -214,8 +298,19 @@ TOOL_HANDLERS = {
     "glob": run_glob,
     "todo_write": run_todo_write,
     "load_skill": run_load_skill,
+    "create_task": run_create_task,
+    "update_task": run_update_task,
+    "list_tasks": run_list_tasks,
+    "get_task": run_get_task,
+    "claim_task": run_claim_task,
+    "complete_task": run_complete_task,
 }
 
-# 基础五工具：子 Agent 只拥有这些，不能再次委派（无 task）、不规划（无 todo_write）、不加载技能（无 load_skill）、不压缩（无 compact）
-SUB_TOOLS = [t for t in TOOLS if t["name"] not in ("task", "todo_write", "load_skill", "compact")]
-SUB_HANDLERS = {k: v for k, v in TOOL_HANDLERS.items() if k not in ("todo_write", "load_skill")}
+# 子 Agent 只保留基础五工具：不能委派（task）、不规划（todo_write）、不加载技能（load_skill）、
+# 不压缩（compact），也不操作全局任务图（create/update/list/get/claim/complete_task）
+SUB_EXCLUDED = {
+    "task", "todo_write", "load_skill", "compact",
+    "create_task", "update_task", "list_tasks", "get_task", "claim_task", "complete_task",
+}
+SUB_TOOLS = [t for t in TOOLS if t["name"] not in SUB_EXCLUDED]
+SUB_HANDLERS = {k: v for k, v in TOOL_HANDLERS.items() if k not in SUB_EXCLUDED}

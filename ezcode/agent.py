@@ -4,7 +4,7 @@ task 工具会派生一个子 Agent：全新的 messages[]，只拥有基础五�
 最终文本作为一条 tool_result 返回给父 Agent。两个循环共享工作目录、hooks 与权限管线。
 """
 
-from . import config, permission
+from . import background, config, permission
 from .compact import COMPACTOR
 from .hooks import HookAbort, HookRegistry
 from .memory import MEMORY_STORE
@@ -35,6 +35,7 @@ class Agent:
         self.system_prompt = config.SYSTEM
         COMPACTOR.notify = self._status
         MEMORY_STORE.notify = self._status
+        background.BACKGROUND.notify = self._status
 
     def register_hook(self, event: str, callback) -> None:
         """注册一个扩展 hook；循环只调用 trigger，扩展逻辑不侵入循环。"""
@@ -53,6 +54,7 @@ class Agent:
 
     async def _loop(self) -> str:
         while True:
+            background.inject_background_results(self.messages)
             self.messages = await COMPACTOR.prepare(self.messages, self.active_request)
             try:
                 response = await self._call()
@@ -144,6 +146,12 @@ class Agent:
         if block.name == "compact":
             self.compact_requested = True
             return "Compaction requested after this tool batch."
+        if background.should_run_background(block.name, block.input or {}):
+            try:
+                task_id = background.start_background_task(block)
+                return f"[Background task {task_id} started] The result will be collected on a later turn."
+            except Exception as exc:
+                return f"Error: {exc}"
         return self._dispatch(block, TOOL_HANDLERS)
 
     def _dispatch(self, block, handlers) -> str:
