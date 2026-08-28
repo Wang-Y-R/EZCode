@@ -39,11 +39,13 @@ python -m ezcode "你的任务"  # 单次执行
 EZCode/
 ├── ezcode/
 │   ├── __init__.py
-│   ├── config.py      # 环境变量、模型端点、系统提示词、shell 探测
-│   ├── tools.py       # 工具定义与本地执行（bash / read / write / edit / glob）
-│   ├── agent.py       # 核心循环：流式调用 + 工具执行 + 回填结果
-│   ├── cli.py         # prompt_toolkit + rich 的终端交互界面
-│   └── __main__.py    # 入口（python -m ezcode）
+│   ├── config.py       # 环境变量、模型端点、系统提示词、shell 探测
+│   ├── tools.py        # 工具定义与本地执行（bash / read / write / edit / glob）
+│   ├── permission.py   # 权限规则：硬拒绝表 + 启发式规则匹配
+│   ├── hooks.py        # hook 系统：事件注册 + 触发，扩展不侵入循环
+│   ├── agent.py        # 核心循环：流式调用 + hook 触发 + 工具执行
+│   ├── cli.py          # prompt_toolkit + rich 的终端交互界面
+│   └── __main__.py     # 入口（python -m ezcode）
 ├── requirements.txt
 ├── .env.example
 ├── TODO.md
