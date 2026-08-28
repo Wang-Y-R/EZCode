@@ -40,7 +40,7 @@ EZCode/
 ├── ezcode/
 │   ├── __init__.py
 │   ├── config.py      # 环境变量、模型端点、系统提示词、shell 探测
-│   ├── tools.py       # 工具定义与本地执行（bash）
+│   ├── tools.py       # 工具定义与本地执行（bash / read / write / edit / glob）
 │   ├── agent.py       # 核心循环：流式调用 + 工具执行 + 回填结果
 │   ├── cli.py         # prompt_toolkit + rich 的终端交互界面
 │   └── __main__.py    # 入口（python -m ezcode）
