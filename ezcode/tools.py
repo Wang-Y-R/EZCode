@@ -171,8 +171,21 @@ TOOLS = [
             "required": ["todos"],
         },
     },
+    {
+        "name": "task",
+        "description": "Run a subagent with fresh conversation context and return its final text. "
+        "Use for focused exploration or a self-contained subtask; the subagent shares the "
+        "workspace but only its final answer comes back.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"prompt": {"type": "string", "minLength": 1, "description": "The subtask for the subagent."}},
+            "required": ["prompt"],
+        },
+    },
 ]
 
+# 注意：task 的 handler 是异步的（需要嵌套调用模型），定义在 agent.py 的 _run_subagent，
+# 因此这里不放进 TOOL_HANDLERS，而是在 Agent._execute 中单独分派。
 TOOL_HANDLERS = {
     "bash": run_bash,
     "read_file": run_read,
@@ -181,3 +194,7 @@ TOOL_HANDLERS = {
     "glob": run_glob,
     "todo_write": run_todo_write,
 }
+
+# 基础五工具：子 Agent 只拥有这些，不能再次委派（无 task）、也不规划（无 todo_write）
+SUB_TOOLS = [t for t in TOOLS if t["name"] not in ("task", "todo_write")]
+SUB_HANDLERS = {k: v for k, v in TOOL_HANDLERS.items() if k != "todo_write"}

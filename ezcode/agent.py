@@ -1,19 +1,26 @@
-"""核心 agent 循环：流式调用模型 -> 触发 hook -> 执行工具 -> 回填结果，直到模型不再调用工具。"""
+"""核心 agent 循环：流式调用模型 -> 触发 hook -> 执行工具 -> 回填结果，直到模型不再调用工具。
+
+task 工具会派生一个子 Agent：全新的 messages[]，只拥有基础五工具（不能再次委派），
+最终文本作为一条 tool_result 返回给父 Agent。两个循环共享工作目录、hooks 与权限管线。
+"""
 
 from . import config, permission
 from .hooks import HookAbort, HookRegistry
-from .tools import TOOLS, TOOL_HANDLERS
+from .tools import TOOLS, TOOL_HANDLERS, SUB_TOOLS, SUB_HANDLERS
+
+MAX_SUB_TURNS = 30
 
 
 class Agent:
     """持有对话历史，run() 一轮任务；UI 通过 on_* 回调观察过程。"""
 
-    def __init__(self, on_text=None, on_tool=None, on_tool_result=None, on_permission=None, on_abort=None):
+    def __init__(self, on_text=None, on_tool=None, on_tool_result=None, on_permission=None, on_abort=None, on_sub=None):
         self.on_text = on_text
         self.on_tool = on_tool
         self.on_tool_result = on_tool_result
         self.on_permission = on_permission
         self.on_abort = on_abort
+        self.on_sub = on_sub
         self.messages = []
         self.hooks = HookRegistry()
         self.register_hook("PreToolUse", self._permission_hook)
@@ -43,7 +50,7 @@ class Agent:
                     continue
                 return "".join(b.text for b in response.content if b.type == "text")
 
-            results, aborted_reason = self._run_tools(tool_calls)
+            results, aborted_reason = await self._run_tools(tool_calls)
 
             if any(b.name == "todo_write" for b in tool_calls):
                 self.rounds_since_todo = 0
@@ -75,7 +82,7 @@ class Agent:
                 raise HookAbort(reason)
         return None
 
-    def _run_tools(self, tool_calls) -> tuple[list, str | None]:
+    async def _run_tools(self, tool_calls) -> tuple[list, str | None]:
         """逐个触发 PreToolUse → 执行工具 → 触发 PostToolUse；用户拒绝时中止本轮并补齐占位结果。"""
         results = []
         for i, block in enumerate(tool_calls):
@@ -83,6 +90,7 @@ class Agent:
                 self.on_tool(block.name, block.input)
             try:
                 blocked = self.hooks.trigger("PreToolUse", block)
+                output = str(blocked) if blocked is not None else await self._execute(block)
             except HookAbort as exc:
                 output = f"Denied by user: {exc.reason}"
                 if self.on_tool_result:
@@ -94,21 +102,77 @@ class Agent:
                         self.on_tool_result(cancelled)
                     results.append({"type": "tool_result", "tool_use_id": rest.id, "content": cancelled})
                 return results, exc.reason
-            output = str(blocked) if blocked is not None else self._execute(block)
             self.hooks.trigger("PostToolUse", block, output)
             if self.on_tool_result:
                 self.on_tool_result(output)
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         return results, None
 
-    def _execute(self, block) -> str:
-        handler = TOOL_HANDLERS.get(block.name)
+    async def _execute(self, block) -> str:
+        """分派工具；task 走异步子 Agent 循环，其余走同步 handler。"""
+        if block.name == "task":
+            return await self._run_subagent((block.input or {}).get("prompt", ""))
+        return self._dispatch(block, TOOL_HANDLERS)
+
+    def _dispatch(self, block, handlers) -> str:
+        handler = handlers.get(block.name)
         if handler is None:
             return f"Error: unknown tool {block.name!r}"
         try:
             return handler(**(block.input or {}))
         except Exception as exc:
             return f"Error: {exc}"
+
+    async def _run_subagent(self, prompt: str) -> str:
+        """用全新 messages[] 跑一个受限子循环，最终文本作为结果返回父 Agent。"""
+        self._sub(f"[Subagent started] {prompt[:60]}")
+        messages = [{"role": "user", "content": prompt}]
+        for _ in range(MAX_SUB_TURNS):
+            response = await self._call_sub(messages)
+            messages.append({"role": "assistant", "content": response.content})
+            tool_calls = [b for b in response.content if b.type == "tool_use"]
+            if not tool_calls:
+                force = self.hooks.trigger("Stop", messages)
+                if force:
+                    messages.append({"role": "user", "content": force})
+                    continue
+                self._sub("[Subagent done]")
+                return self._extract_text(response.content) or "(no summary)"
+            results = []
+            for block in tool_calls:
+                try:
+                    blocked = self.hooks.trigger("PreToolUse", block)
+                except HookAbort as exc:
+                    blocked = f"Denied by user: {exc.reason}"
+                if blocked is not None:
+                    output = str(blocked)
+                else:
+                    output = self._dispatch(block, SUB_HANDLERS)
+                self.hooks.trigger("PostToolUse", block, output)
+                self._sub(f"[sub] {block.name}: {output[:100]}")
+                results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
+            messages.append({"role": "user", "content": results})
+        self._sub("[Subagent stopped]")
+        return "Subagent stopped after 30 turns without a final answer."
+
+    async def _call_sub(self, messages):
+        return await config.client.messages.create(
+            model=config.MODEL,
+            system=config.SUB_SYSTEM,
+            messages=messages,
+            tools=SUB_TOOLS,
+            max_tokens=8000,
+        )
+
+    @staticmethod
+    def _extract_text(content) -> str:
+        if not isinstance(content, list):
+            return str(content)
+        return "\n".join(b.text for b in content if b.type == "text")
+
+    def _sub(self, line: str) -> None:
+        if self.on_sub:
+            self.on_sub(line)
 
     async def _call(self):
         kwargs = dict(

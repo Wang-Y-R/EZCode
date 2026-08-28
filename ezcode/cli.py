@@ -39,6 +39,7 @@ class TurnRenderer:
         agent.on_tool = self._on_tool
         agent.on_tool_result = self._on_tool_result
         agent.on_abort = self._on_abort
+        agent.on_sub = self._on_sub
 
     def _on_text(self, delta: str) -> None:
         self.buffer.append(delta)
@@ -88,6 +89,9 @@ class TurnRenderer:
 
     def _on_abort(self, reason: str) -> None:
         self.buffer.append(f"\n\n**[已取消]** 用户拒绝了该操作：{reason}\n")
+
+    def _on_sub(self, line: str) -> None:
+        self.buffer.append(f"\n> {line}\n")
 
     @staticmethod
     def _make_permission_handler(live):
