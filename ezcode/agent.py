@@ -5,26 +5,36 @@ task 工具会派生一个子 Agent：全新的 messages[]，只拥有基础五�
 """
 
 from . import config, permission
+from .compact import COMPACTOR
 from .hooks import HookAbort, HookRegistry
+from .memory import MEMORY_STORE
 from .tools import TOOLS, TOOL_HANDLERS, SUB_TOOLS, SUB_HANDLERS
 
 MAX_SUB_TURNS = 30
+MAX_REACTIVE_RETRIES = 1
 
 
 class Agent:
     """持有对话历史，run() 一轮任务；UI 通过 on_* 回调观察过程。"""
 
-    def __init__(self, on_text=None, on_tool=None, on_tool_result=None, on_permission=None, on_abort=None, on_sub=None):
+    def __init__(self, on_text=None, on_tool=None, on_tool_result=None, on_permission=None, on_abort=None, on_sub=None, on_status=None):
         self.on_text = on_text
         self.on_tool = on_tool
         self.on_tool_result = on_tool_result
         self.on_permission = on_permission
         self.on_abort = on_abort
         self.on_sub = on_sub
+        self.on_status = on_status
         self.messages = []
         self.hooks = HookRegistry()
         self.register_hook("PreToolUse", self._permission_hook)
         self.rounds_since_todo = 0
+        self.active_request = ""
+        self.compact_requested = False
+        self.reactive_retries = 0
+        self.system_prompt = config.SYSTEM
+        COMPACTOR.notify = self._status
+        MEMORY_STORE.notify = self._status
 
     def register_hook(self, event: str, callback) -> None:
         """注册一个扩展 hook；循环只调用 trigger，扩展逻辑不侵入循环。"""
@@ -35,11 +45,25 @@ class Agent:
         self.hooks.trigger("UserPromptSubmit", task)
         self.messages.append({"role": "user", "content": task})
         self.rounds_since_todo = 0
+        self.active_request = task
+        self.compact_requested = False
+        self.reactive_retries = 0
+        self.system_prompt = await MEMORY_STORE.build_system(config.SYSTEM, self.messages)
         return await self._loop()
 
     async def _loop(self) -> str:
         while True:
-            response = await self._call()
+            self.messages = await COMPACTOR.prepare(self.messages, self.active_request)
+            try:
+                response = await self._call()
+            except Exception as exc:
+                if self._context_too_long(exc) and self.reactive_retries < MAX_REACTIVE_RETRIES:
+                    self._status("[reactive compact]")
+                    self.messages = await COMPACTOR.reactive_compact(self.messages, self.active_request)
+                    self.reactive_retries += 1
+                    continue
+                raise
+            self.reactive_retries = 0
             self.messages.append({"role": "assistant", "content": response.content})
 
             tool_calls = [b for b in response.content if b.type == "tool_use"]
@@ -48,6 +72,7 @@ class Agent:
                 if force:
                     self.messages.append({"role": "user", "content": force})
                     continue
+                await MEMORY_STORE.extract_and_consolidate(self.messages)
                 return "".join(b.text for b in response.content if b.type == "text")
 
             results, aborted_reason = await self._run_tools(tool_calls)
@@ -65,6 +90,10 @@ class Agent:
                 if self.on_abort:
                     self.on_abort(aborted_reason)
                 return f"已取消：用户拒绝了该操作（{aborted_reason}）"
+
+            if self.compact_requested:
+                self.compact_requested = False
+                self.messages = await COMPACTOR.compact_history(self.messages, self.active_request)
 
     def _permission_hook(self, block) -> str | None:
         """PreToolUse：三道闸门（硬拒绝 → 规则 → 用户审批）。返回字符串表示拦下本条；用户拒绝时抛 HookAbort 中止本轮。"""
@@ -109,9 +138,12 @@ class Agent:
         return results, None
 
     async def _execute(self, block) -> str:
-        """分派工具；task 走异步子 Agent 循环，其余走同步 handler。"""
+        """分派工具；task 走异步子 Agent 循环，compact 标记本轮后压缩，其余走同步 handler。"""
         if block.name == "task":
             return await self._run_subagent((block.input or {}).get("prompt", ""))
+        if block.name == "compact":
+            self.compact_requested = True
+            return "Compaction requested after this tool batch."
         return self._dispatch(block, TOOL_HANDLERS)
 
     def _dispatch(self, block, handlers) -> str:
@@ -174,10 +206,18 @@ class Agent:
         if self.on_sub:
             self.on_sub(line)
 
+    def _status(self, line: str) -> None:
+        if self.on_status:
+            self.on_status(line)
+
+    @staticmethod
+    def _context_too_long(exc: Exception) -> bool:
+        return any(t in str(exc).lower() for t in ("prompt_too_long", "too many tokens"))
+
     async def _call(self):
         kwargs = dict(
             model=config.MODEL,
-            system=config.SYSTEM,
+            system=self.system_prompt,
             messages=self.messages,
             tools=TOOLS,
             max_tokens=8000,

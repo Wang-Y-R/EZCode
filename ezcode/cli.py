@@ -40,6 +40,7 @@ class TurnRenderer:
         agent.on_tool_result = self._on_tool_result
         agent.on_abort = self._on_abort
         agent.on_sub = self._on_sub
+        agent.on_status = self._on_status
 
     def _on_text(self, delta: str) -> None:
         self.buffer.append(delta)
@@ -91,6 +92,9 @@ class TurnRenderer:
         self.buffer.append(f"\n\n**[已取消]** 用户拒绝了该操作：{reason}\n")
 
     def _on_sub(self, line: str) -> None:
+        self.buffer.append(f"\n> {line}\n")
+
+    def _on_status(self, line: str) -> None:
         self.buffer.append(f"\n> {line}\n")
 
     @staticmethod

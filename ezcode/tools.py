@@ -193,6 +193,15 @@ TOOLS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "compact",
+        "description": "Summarize earlier conversation to free context space. Use after completing "
+        "a distinct stage when the details that follow no longer matter.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 # 注意：task 的 handler 是异步的（需要嵌套调用模型），定义在 agent.py 的 _run_subagent，
@@ -207,6 +216,6 @@ TOOL_HANDLERS = {
     "load_skill": run_load_skill,
 }
 
-# 基础五工具：子 Agent 只拥有这些，不能再次委派（无 task）、不规划（无 todo_write）、不加载技能（无 load_skill）
-SUB_TOOLS = [t for t in TOOLS if t["name"] not in ("task", "todo_write", "load_skill")]
+# 基础五工具：子 Agent 只拥有这些，不能再次委派（无 task）、不规划（无 todo_write）、不加载技能（无 load_skill）、不压缩（无 compact）
+SUB_TOOLS = [t for t in TOOLS if t["name"] not in ("task", "todo_write", "load_skill", "compact")]
 SUB_HANDLERS = {k: v for k, v in TOOL_HANDLERS.items() if k not in ("todo_write", "load_skill")}

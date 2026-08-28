@@ -41,15 +41,18 @@ EZCode/
 ├── ezcode/
 │   ├── __init__.py
 │   ├── config.py       # 环境变量、模型端点、系统提示词、shell 探测
-│   ├── tools.py        # 工具定义与本地执行（bash / read / write / edit / glob / todo_write / task / load_skill）
+│   ├── tools.py        # 工具定义与本地执行（bash / read / write / edit / glob / todo_write / task / load_skill / compact）
 │   ├── todo.py         # TodoWrite：任务列表维护 + 校验渲染（规划能力）
 │   ├── skill.py        # Skill Loading：扫描 skills/*/SKILL.md，目录进 system prompt
+│   ├── compact.py      # Context Compact：四步压缩管线（budget / snip / micro / summary）
+│   ├── memory.py       # Memory：跨会话记忆（召回 / 提取 / 整理三个子系统）
 │   ├── permission.py   # 权限规则：硬拒绝表 + 启发式规则匹配
 │   ├── hooks.py        # hook 系统：事件注册 + 触发，扩展不侵入循环
 │   ├── agent.py        # 核心循环：流式调用 + hook 触发 + 工具执行
 │   ├── cli.py          # prompt_toolkit + rich 的终端交互界面
 │   └── __main__.py     # 入口（python -m ezcode）
 ├── skills/          # 技能目录：skills/<name>/SKILL.md（YAML frontmatter + 正文）
+├── .memory/         # 跨会话记忆：MEMORY.md 索引 + 每条记忆一个 .md（运行时生成）
 ├── pyproject.toml   # 打包配置（pip install -e .）
 ├── requirements.txt
 ├── .env.example
