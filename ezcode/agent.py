@@ -17,6 +17,7 @@ class Agent:
         self.messages = []
         self.hooks = HookRegistry()
         self.register_hook("PreToolUse", self._permission_hook)
+        self.rounds_since_todo = 0
 
     def register_hook(self, event: str, callback) -> None:
         """注册一个扩展 hook；循环只调用 trigger，扩展逻辑不侵入循环。"""
@@ -26,6 +27,7 @@ class Agent:
         """执行一轮任务，返回模型的最终文本；历史保留，供后续轮次复用。"""
         self.hooks.trigger("UserPromptSubmit", task)
         self.messages.append({"role": "user", "content": task})
+        self.rounds_since_todo = 0
         return await self._loop()
 
     async def _loop(self) -> str:
@@ -42,6 +44,15 @@ class Agent:
                 return "".join(b.text for b in response.content if b.type == "text")
 
             results, aborted_reason = self._run_tools(tool_calls)
+
+            if any(b.name == "todo_write" for b in tool_calls):
+                self.rounds_since_todo = 0
+            else:
+                self.rounds_since_todo += 1
+                if self.rounds_since_todo >= 3:
+                    results.append({"type": "text", "text": "<reminder>Update your todos.</reminder>"})
+                    self.rounds_since_todo = 0
+
             self.messages.append({"role": "user", "content": results})
             if aborted_reason is not None:
                 if self.on_abort:

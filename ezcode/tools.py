@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from . import config
+from .todo import run_todo_write
 
 WORKDIR_PATH = Path(config.WORKDIR).resolve()
 
@@ -146,6 +147,30 @@ TOOLS = [
             "required": ["pattern"],
         },
     },
+    {
+        "name": "todo_write",
+        "description": "Create and manage a task list to track progress on the current task. "
+        "Use it before multi-step work: list steps as pending, mark the one you're working on "
+        "in_progress (only one at a time), and completed when done. Each call replaces the whole list.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "todos": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "The task description."},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                        },
+                        "required": ["content", "status"],
+                    },
+                },
+            },
+            "required": ["todos"],
+        },
+    },
 ]
 
 TOOL_HANDLERS = {
@@ -154,4 +179,5 @@ TOOL_HANDLERS = {
     "write_file": run_write,
     "edit_file": run_edit,
     "glob": run_glob,
+    "todo_write": run_todo_write,
 }

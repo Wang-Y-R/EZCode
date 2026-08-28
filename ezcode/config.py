@@ -26,8 +26,9 @@ client = AsyncAnthropic(base_url=BASE_URL)
 SYSTEM = (
     f"You are a coding agent running on {platform.system()} in {WORKDIR}. "
     "Use the available tools to read and edit files, run commands, and solve the "
-    "user's programming tasks. Destructive commands and access outside the workspace "
-    "require user approval. Act, don't just explain."
+    "user's programming tasks. Before starting a multi-step task, use todo_write to "
+    "plan your steps and update the status as you go. Destructive commands and access "
+    "outside the workspace require user approval. Act, don't just explain."
 )
 
 

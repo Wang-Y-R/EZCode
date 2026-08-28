@@ -34,6 +34,7 @@ class TurnRenderer:
     def __init__(self, agent: Agent):
         self.agent = agent
         self.buffer: list[str] = []
+        self._last_tool: str | None = None
         agent.on_text = self._on_text
         agent.on_tool = self._on_tool
         agent.on_tool_result = self._on_tool_result
@@ -54,14 +55,36 @@ class TurnRenderer:
 
     def _on_tool(self, name: str, args: dict) -> None:
         args = args if isinstance(args, dict) else {}
+        self._last_tool = name
         if name == "bash":
             self.buffer.append(f"\n\n```bash\n$ {args.get('command', '')}\n```\n\n")
+        elif name == "todo_write":
+            self.buffer.append("\n\n### 任务计划\n")
         else:
             self.buffer.append(f"\n\n```text\n{name}({self._summarize(args)})\n```\n\n")
 
     def _on_tool_result(self, output: str) -> None:
+        if self._last_tool == "todo_write":
+            # 专用渲染：把 `[ ]/[>]/[x]` 清单转成带图标的富文本，避免和普通工具输出混在一起
+            self.buffer.append(self._render_todos(output))
+            return
         preview = output[:600] + ("\n…（已截断）" if len(output) > 600 else "")
         self.buffer.append(f"```text\n{preview}\n```\n")
+
+    @staticmethod
+    def _render_todos(output: str) -> str:
+        lines = []
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("[x]"):
+                lines.append(f"- ~~✓ {line[3:]}~~")
+            elif line.startswith("[>]"):
+                lines.append(f"- **▶ {line[3:]}**")
+            elif line.startswith("[ ]"):
+                lines.append(f"- · {line[3:]}")
+            elif line:
+                lines.append(line)
+        return "\n" + "\n".join(lines) + "\n\n"
 
     def _on_abort(self, reason: str) -> None:
         self.buffer.append(f"\n\n**[已取消]** 用户拒绝了该操作：{reason}\n")
