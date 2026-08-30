@@ -1,23 +1,20 @@
-# EZCode —— 终端编程智能体
+EZCode —— 终端编程智能体
 
 一个在终端运行、与 Claude 交互的编程智能体：它自主读写文件、执行命令，完成交给它的编程任务，类似一个精简的 Claude Code。
 
-## 仓库地址
-
+【仓库地址】
 https://github.com/Wang-Y-R/EZCode
 
-## 运行方法
-
-1. 安装：`pip install -e .`
-2. 配置密钥：复制 `.env.example` 为 `.env`，填入 `ANTHROPIC_API_KEY` 与 `MODEL_ID`
+【运行方法】
+1. 安装：pip install -e .
+2. 配置密钥：复制 .env.example 为 .env，填入 ANTHROPIC_API_KEY 与 MODEL_ID
    （密钥只放环境变量或未提交配置，绝不写入仓库）
 3. 启动：
-   - 交互式：`ezcode`
-   - 单次执行：`ezcode "你的任务"`
-   - 或：`python -m ezcode [任务]`
+   - 交互式：ezcode
+   - 单次执行：ezcode "你的任务"
+   - 或：python -m ezcode [任务]
 
-## 核心特性
-
+【核心特性】
 - 自研 Agent 循环：流式调用 + 工具执行 + 循环终止，全部自己实现，不依赖任何 agent 框架
 - 对话历史与上下文管理：token 预算 + 四步压缩（截断 / 裁剪 / 微压缩 / 摘要）
 - 本地工具：bash / read / write / edit / glob / grep / todo_write，路径沙箱防止越权
@@ -29,26 +26,17 @@ https://github.com/Wang-Y-R/EZCode
 - 任务图：文件持久化的 Task + 依赖（blockedBy）
 - 后台任务：慢命令丢后台线程，完成后注入通知
 
-## 权限模式
+【权限模式】
+REPL 输入 /perm auto|ask|bypass 运行时切换，环境变量 EZCODE_PERMISSION_MODE 设初值。
 
-运行时用 REPL 命令 `/perm auto|ask|bypass` 切换，环境变量 `EZCODE_PERMISSION_MODE` 设初值（默认 `auto`）。
+模式      bash普通   bash危险   write/edit   read/grep越界   硬拒绝表
+auto      放行      询问       越界才问     询问           拦截
+ask       询问      询问       询问         询问           拦截
+bypass    放行      放行       放行         放行           拦截
 
-| 工具 | auto | ask | bypass |
-|---|---|---|---|
-| bash（破坏性 / 越界） | 询问 | 询问 | 放行 |
-| bash（普通） | 放行 | 询问 | 放行 |
-| write / edit | 越界才问 | 询问 | 放行 |
-| read / grep（工作区内） | 放行 | 放行 | 放行 |
-| read / grep（越界） | 询问 | 询问 | 放行 |
-| 硬拒绝表（sudo、rm -rf / 等） | 拦截 | 拦截 | 拦截 |
+说明：ask 模式对会改变状态的操作（bash / write / edit）一律询问；工作区内只读（read / grep）始终放行；硬拒绝表（sudo、rm -rf / 等）任何模式都不放行。
 
-- `auto`：只在规则命中（破坏性命令 / 越界路径）时询问
-- `ask`：额外对所有会改变状态的操作（bash / write / edit）一律询问，工作区内只读不打扰
-- `bypass`：跳过规则闸门，仅保留硬拒绝表
-
-## 项目结构
-
-```
+【项目结构】
 EZCode/
 ├── ezcode/            核心包
 │   ├── config.py      环境变量、模型端点、系统提示词、shell 探测
@@ -73,8 +61,6 @@ EZCode/
 ├── TODO.md
 ├── README.md
 └── README.txt
-```
 
-## 设计说明
-
+【设计说明】
 对话历史与上下文管理、工具定义与本地执行、模型输出解析、循环终止、错误处理等核心逻辑均为自行编写，仅使用 Anthropic 官方客户端库完成模型调用。

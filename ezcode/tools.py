@@ -1,6 +1,8 @@
-"""工具定义与本地执行：bash / read_file / write_file / edit_file / glob / todo_write / task / load_skill。"""
+"""工具定义与本地执行：bash / read_file / write_file / edit_file / glob / grep / todo_write / task / load_skill。"""
 
+import fnmatch
 import glob as _glob
+import re
 import subprocess
 from pathlib import Path
 
@@ -83,10 +85,15 @@ def run_write(path: str, content: str) -> str:
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
+        if not old_text:
+            return "Error: old_text must not be empty"
         file_path = safe_path(path)
         text = file_path.read_text(encoding="utf-8")
-        if old_text not in text:
+        count = text.count(old_text)
+        if count == 0:
             return f"Error: text not found in {path}"
+        if count > 1:
+            return f"Error: old_text is not unique ({count} occurrences); provide more surrounding context to disambiguate"
         file_path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
         return f"Edited {path}"
     except Exception as exc:
@@ -105,6 +112,56 @@ def run_glob(pattern: str) -> str:
         return "\n".join(shown) if shown else "(no matches)"
     except Exception as exc:
         return f"Error: {exc}"
+
+
+def run_grep(pattern: str, path: str = ".", glob: str | None = None) -> str:
+    """按正则搜索 path（文件或目录）的文件内容，返回 file:line: text 匹配列表。"""
+    try:
+        regex = re.compile(pattern)
+    except re.error as exc:
+        return f"Error: invalid regex: {exc}"
+
+    try:
+        root = safe_path(path)
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+    if not root.exists():
+        return f"Error: path not found: {path}"
+
+    if root.is_file():
+        files = [root]
+    else:
+        ignored = {
+            ".git", "__pycache__", ".venv", "venv", "node_modules",
+            ".memory", ".tasks", ".transcripts", ".task_outputs",
+        }
+        files = sorted(
+            p for p in root.rglob("*")
+            if p.is_file() and not (set(p.relative_to(root).parts) & ignored)
+        )
+
+    matches = []
+    for file_path in files:
+        if glob and not fnmatch.fnmatch(file_path.name, glob):
+            continue
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if regex.search(line):
+                matches.append(f"{file_path.relative_to(WORKDIR_PATH)}:{lineno}: {line.strip()[:200]}")
+                if len(matches) >= 200:
+                    break
+        if len(matches) >= 200:
+            break
+
+    if not matches:
+        return "(no matches)"
+    if len(matches) >= 200:
+        matches.append("... (more matches omitted; narrow the pattern)")
+    return "\n".join(matches)
 
 
 TOOLS = [
@@ -149,7 +206,8 @@ TOOLS = [
     },
     {
         "name": "edit_file",
-        "description": "Replace the first occurrence of old_text with new_text in a file.",
+        "description": "Replace old_text with new_text in a file. old_text must match exactly once; "
+        "if it appears multiple times, add more surrounding context to make it unique.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -166,6 +224,19 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {"pattern": {"type": "string", "description": "Glob pattern, e.g. '**/*.py'."}},
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "grep",
+        "description": "Search file contents for a regular expression and return file:line matches.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regular expression to search for."},
+                "path": {"type": "string", "description": "File or directory to search, relative to the workspace (default '.')."},
+                "glob": {"type": "string", "description": "Optional filename filter, e.g. '*.py'."},
+            },
             "required": ["pattern"],
         },
     },
@@ -296,6 +367,7 @@ TOOL_HANDLERS = {
     "write_file": run_write,
     "edit_file": run_edit,
     "glob": run_glob,
+    "grep": run_grep,
     "todo_write": run_todo_write,
     "load_skill": run_load_skill,
     "create_task": run_create_task,

@@ -105,7 +105,7 @@ class Agent:
             reason = permission.check_deny_list(args.get("command", ""))
             if reason:
                 return f"Blocked: {reason}"
-        reason = permission.check_rules(name, args)
+        reason = permission.approval_reason(name, args)
         if reason:
             if self.on_permission is None:
                 return f"Permission required: {reason}"

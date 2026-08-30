@@ -10,7 +10,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from . import config
+from . import config, permission
 from .agent import Agent
 
 console = Console()
@@ -160,7 +160,8 @@ class REPL:
         return await asyncio.to_thread(input, ">> ")
 
     async def run(self) -> None:
-        console.print(Panel(WELCOME, title="EZCode", border_style="cyan"))
+        welcome = WELCOME + f"\n权限模式：{permission.MODE}（输入 /perm auto|ask|bypass 切换）"
+        console.print(Panel(welcome, title="EZCode", border_style="cyan"))
         while True:
             try:
                 task = await self._prompt()
@@ -169,5 +170,9 @@ class REPL:
             task = task.strip()
             if not task or task.lower() in ("q", "exit", "quit"):
                 break
+            if task.startswith("/perm"):
+                arg = task[len("/perm"):].strip()
+                console.print(permission.set_mode(arg) if arg else f"当前权限模式：{permission.MODE}")
+                continue
             await self.renderer.run(task)
         console.print("\n[dim]再见。[/dim]")

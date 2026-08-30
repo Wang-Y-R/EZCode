@@ -14,3 +14,9 @@ dist/
 
 # 本地交互历史
 .agent_history
+
+# 运行时状态（跨会话记忆 / 任务图 / 上下文压缩归档 / 大输出落盘）
+.memory/
+.tasks/
+.transcripts/
+.task_outputs/
