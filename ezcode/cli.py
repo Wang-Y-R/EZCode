@@ -1,4 +1,4 @@
-"""终端交互：prompt_toolkit 提供输入历史，rich 提供流式 Markdown 渲染。"""
+"""终端交互：prompt_toolkit 提供输入历史，输出按追加方式逐条打印（像聊天记录一样），不用 Live 原地重绘。"""
 
 import asyncio
 import os
@@ -6,8 +6,7 @@ import os
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.live import Live
-from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 
 from . import config, permission
@@ -29,21 +28,48 @@ def _make_session():
 
 
 class TurnRenderer:
-    """把 agent 的过程事件累积成 markdown 片段，在一个 rich Live 面板里逐帧渲染。"""
+    """把 agent 的过程事件直接追加打印到终端，每段只渲染一次，滚动时不会重叠。"""
 
     def __init__(self, agent: Agent):
         self.agent = agent
-        self.buffer: list[str] = []
         self._last_tool: str | None = None
+        self._text_open = False
+        self._thinking_open = False
         agent.on_text = self._on_text
         agent.on_tool = self._on_tool
         agent.on_tool_result = self._on_tool_result
         agent.on_abort = self._on_abort
         agent.on_sub = self._on_sub
         agent.on_status = self._on_status
+        agent.on_thinking = self._on_thinking
+
+    def _end_text(self) -> None:
+        if self._text_open:
+            console.print("")
+            self._text_open = False
+
+    def _end_thinking(self) -> None:
+        if self._thinking_open:
+            console.print("")
+            self._thinking_open = False
+
+    def _close_streams(self) -> None:
+        self._end_thinking()
+        self._end_text()
 
     def _on_text(self, delta: str) -> None:
-        self.buffer.append(delta)
+        self._end_thinking()
+        console.print(delta, end="", markup=False, highlight=False)
+        console.file.flush()
+        self._text_open = not delta.endswith("\n")
+
+    def _on_thinking(self, delta: str) -> None:
+        self._end_text()
+        if not self._thinking_open:
+            console.print("\n[dim]思考 [/dim]", end="")
+            self._thinking_open = True
+        console.print(delta, end="", markup=False, highlight=False, style="dim")
+        console.file.flush()
 
     @staticmethod
     def _summarize(args: dict) -> str:
@@ -57,21 +83,34 @@ class TurnRenderer:
 
     def _on_tool(self, name: str, args: dict) -> None:
         args = args if isinstance(args, dict) else {}
+        self._close_streams()
         self._last_tool = name
         if name == "bash":
-            self.buffer.append(f"\n\n```bash\n$ {args.get('command', '')}\n```\n\n")
+            cmd = args.get("command", "")
+            if len(cmd) > 200:
+                cmd = cmd[:200] + "…"
+            console.print(f"\n$ {cmd}\n", markup=False, highlight=False, style="cyan")
         elif name == "todo_write":
-            self.buffer.append("\n\n### 任务计划\n")
+            console.print("\n任务计划\n", style="bold")
         else:
-            self.buffer.append(f"\n\n```text\n{name}({self._summarize(args)})\n```\n\n")
+            console.print(f"· {name} {self._summarize(args)}", markup=False, style="dim")
 
     def _on_tool_result(self, output: str) -> None:
         if self._last_tool == "todo_write":
-            # 专用渲染：把 `[ ]/[>]/[x]` 清单转成带图标的富文本，避免和普通工具输出混在一起
-            self.buffer.append(self._render_todos(output))
+            console.print(self._render_todos(output), markup=False)
             return
-        preview = output[:600] + ("\n…（已截断）" if len(output) > 600 else "")
-        self.buffer.append(f"```text\n{preview}\n```\n")
+        if self._last_tool != "bash":
+            # 只展示 bash 的结果（用户要看 pytest 运行），其余工具结果省略
+            return
+        lines = output.splitlines()
+        preview = "\n".join(lines[:5])
+        truncated = len(lines) > 5 or len(preview) > 300
+        if len(preview) > 300:
+            preview = preview[:300] + "…"
+        if truncated:
+            preview += f"\n…（已截断：共 {len(lines)} 行 / {len(output)} 字符）"
+        console.print(preview, markup=False, highlight=False)
+        console.print()
 
     @staticmethod
     def _render_todos(output: str) -> str:
@@ -79,72 +118,53 @@ class TurnRenderer:
         for line in output.splitlines():
             line = line.strip()
             if line.startswith("[x]"):
-                lines.append(f"- ~~✓ {line[3:]}~~")
+                lines.append(f"✓ {line[3:]}")
             elif line.startswith("[>]"):
-                lines.append(f"- **▶ {line[3:]}**")
+                lines.append(f"▶ {line[3:]}")
             elif line.startswith("[ ]"):
-                lines.append(f"- · {line[3:]}")
+                lines.append(f"· {line[3:]}")
             elif line:
                 lines.append(line)
-        return "\n" + "\n".join(lines) + "\n\n"
+        return "\n" + "\n".join(lines) + "\n"
 
     def _on_abort(self, reason: str) -> None:
-        self.buffer.append(f"\n\n**[已取消]** 用户拒绝了该操作：{reason}\n")
+        self._close_streams()
+        console.print(f"\n[已取消] 用户拒绝了该操作：{reason}\n", markup=False, style="red")
 
     def _on_sub(self, line: str) -> None:
-        self.buffer.append(f"\n> {line}\n")
+        self._close_streams()
+        console.print(f"> {line}", markup=False, style="dim")
 
     def _on_status(self, line: str) -> None:
-        self.buffer.append(f"\n> {line}\n")
+        self._close_streams()
+        console.print(f"> {line}", markup=False, style="dim")
 
     @staticmethod
-    def _make_permission_handler(live):
+    def _make_permission_handler():
         def handler(name: str, args: dict, reason: str) -> str:
-            live.stop()
+            summary = ", ".join(f"{k}={str(v)[:60]}" for k, v in args.items())
+            console.print(Panel(
+                f"[bold yellow]权限请求[/bold yellow]\n原因：{escape(reason)}\n工具：{name}({escape(summary)})",
+                border_style="yellow",
+            ))
             try:
-                summary = ", ".join(f"{k}={str(v)[:60]}" for k, v in args.items())
-                console.print(Panel(
-                    f"[bold yellow]权限请求[/bold yellow]\n原因：{reason}\n工具：{name}({summary})",
-                    border_style="yellow",
-                ))
-                try:
-                    ans = console.input("是否允许执行？[y/N] ").strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    ans = ""
-                return "allow" if ans in ("y", "yes") else "deny"
-            finally:
-                live.start()
+                ans = console.input("是否允许执行？[y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                ans = ""
+            return "allow" if ans in ("y", "yes") else "deny"
         return handler
 
     async def run(self, task: str) -> None:
-        self.buffer.clear()
-
-        def panel(text: str) -> Panel:
-            return Panel(Markdown(text or "_思考中…_"), title="EZCode", border_style="cyan")
-
-        with Live(panel("_思考中…_"), console=console, refresh_per_second=10) as live:
-            async def render() -> None:
-                last_len = -1
-                while True:
-                    n = len(self.buffer)
-                    if n != last_len:
-                        live.update(panel("".join(self.buffer)))
-                        last_len = n
-                    await asyncio.sleep(0.05)
-
-            renderer = asyncio.create_task(render())
-            self.agent.on_permission = self._make_permission_handler(live)
-            try:
-                await self.agent.run(task)
-            except Exception as exc:
-                self.buffer.append(f"\n\n**[错误]** {exc}\n")
-            finally:
-                renderer.cancel()
-                try:
-                    await renderer
-                except asyncio.CancelledError:
-                    pass
-                live.update(panel("".join(self.buffer)))
+        self._text_open = False
+        self._thinking_open = False
+        self.agent.on_permission = self._make_permission_handler()
+        try:
+            await self.agent.run(task)
+        except Exception as exc:
+            self._close_streams()
+            console.print(f"\n[错误] {exc}\n", markup=False, style="red")
+        finally:
+            self._close_streams()
         console.print()
 
 

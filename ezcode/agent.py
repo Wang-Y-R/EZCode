@@ -4,6 +4,8 @@ task 工具会派生一个子 Agent：全新的 messages[]，只拥有基础五�
 最终文本作为一条 tool_result 返回给父 Agent。两个循环共享工作目录、hooks 与权限管线。
 """
 
+import asyncio
+
 from . import background, config, permission
 from .compact import COMPACTOR
 from .hooks import HookAbort, HookRegistry
@@ -17,7 +19,7 @@ MAX_REACTIVE_RETRIES = 1
 class Agent:
     """持有对话历史，run() 一轮任务；UI 通过 on_* 回调观察过程。"""
 
-    def __init__(self, on_text=None, on_tool=None, on_tool_result=None, on_permission=None, on_abort=None, on_sub=None, on_status=None):
+    def __init__(self, on_text=None, on_tool=None, on_tool_result=None, on_permission=None, on_abort=None, on_sub=None, on_status=None, on_thinking=None):
         self.on_text = on_text
         self.on_tool = on_tool
         self.on_tool_result = on_tool_result
@@ -25,6 +27,7 @@ class Agent:
         self.on_abort = on_abort
         self.on_sub = on_sub
         self.on_status = on_status
+        self.on_thinking = on_thinking
         self.messages = []
         self.hooks = HookRegistry()
         self.register_hook("PreToolUse", self._permission_hook)
@@ -152,7 +155,7 @@ class Agent:
                 return f"[Background task {task_id} started] The result will be collected on a later turn."
             except Exception as exc:
                 return f"Error: {exc}"
-        return self._dispatch(block, TOOL_HANDLERS)
+        return await asyncio.to_thread(self._dispatch, block, TOOL_HANDLERS)
 
     def _dispatch(self, block, handlers) -> str:
         handler = handlers.get(block.name)
@@ -187,7 +190,7 @@ class Agent:
                 if blocked is not None:
                     output = str(blocked)
                 else:
-                    output = self._dispatch(block, SUB_HANDLERS)
+                    output = await asyncio.to_thread(self._dispatch, block, SUB_HANDLERS)
                 self.hooks.trigger("PostToolUse", block, output)
                 self._sub(f"[sub] {block.name}: {output[:100]}")
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
@@ -230,15 +233,27 @@ class Agent:
             tools=TOOLS,
             max_tokens=8000,
         )
+        if config.THINKING_BUDGET > 0:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": config.THINKING_BUDGET}
+            kwargs["max_tokens"] = config.THINKING_BUDGET + 8000
         try:
             async with config.client.messages.stream(**kwargs) as stream:
-                async for text in stream.text_stream:
-                    if self.on_text:
-                        self.on_text(text)
+                async for event in stream:
+                    if event.type == "content_block_delta":
+                        delta = event.delta
+                        if delta.type == "text_delta":
+                            if self.on_text:
+                                self.on_text(delta.text)
+                        elif delta.type == "thinking_delta":
+                            if self.on_thinking:
+                                self.on_thinking(delta.thinking)
                 return await stream.get_final_message()
         except Exception:
             # 端点不支持流式时回退到一次性请求
             response = await config.client.messages.create(**kwargs)
+            thinking = "\n".join(b.thinking for b in response.content if b.type == "thinking")
+            if self.on_thinking and thinking:
+                self.on_thinking(thinking)
             text = "".join(b.text for b in response.content if b.type == "text")
             if self.on_text and text:
                 self.on_text(text)
